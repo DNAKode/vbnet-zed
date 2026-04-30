@@ -146,6 +146,8 @@ treated as release-proven.
   Release server archive.
 - Download blocked: allow Zed's `download_file` capability for
   `github.com/DNAKode/vbnet-lsp`, then restart the language server.
+- Local server or debugger launch blocked: allow Zed's `process:exec`
+  capability for the configured `vbnet-ls`, `dotnet`, or `netcoredbg` command.
 - Unsupported platform: build the server locally and configure
   `lsp.vbnet-ls.binary.path`.
 - Missing .NET SDK or MSBuild: install the .NET SDK used by the project and, if
