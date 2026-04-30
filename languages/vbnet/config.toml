@@ -1,4 +1,5 @@
 name = "VB.NET"
+code_fence_block_name = "vb"
 grammar = "vbnet"
 path_suffixes = ["vb"]
 line_comments = ["' "]
