@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use zed_extension_api as zed;
 
 use crate::{DEBUG_ADAPTER_ID, DEBUG_LOCATOR_ID, platform};
@@ -150,6 +152,42 @@ pub(crate) fn dap_locator_create_scenario(
     })
 }
 
+pub(crate) fn run_dap_locator(
+    locator_name: String,
+    build_task: zed::TaskTemplate,
+) -> zed::Result<zed::DebugRequest> {
+    if locator_name != DEBUG_LOCATOR_ID {
+        return Err(format!(
+            "Unsupported debug locator '{locator_name}'. Expected '{DEBUG_LOCATOR_ID}'."
+        ));
+    }
+
+    let cwd = build_task.cwd.clone().unwrap_or_else(|| ".".to_string());
+    let project_path = project_path_from_dotnet_args(&build_task.args)
+        .map(|path| absolutize_path(&cwd, &path))
+        .or_else(|| single_vb_project_in(&cwd))
+        .ok_or_else(|| {
+            format!(
+                "Could not infer a VB.NET project from debug task '{}'. Add an explicit program path to the Zed debug configuration.",
+                build_task.label
+            )
+        })?;
+
+    let program = find_debug_program_for_project(&project_path).ok_or_else(|| {
+        format!(
+            "Could not find a built debug target for '{}'. Build the project first or add an explicit program path.",
+            project_path.display()
+        )
+    })?;
+
+    Ok(zed::DebugRequest::Launch(zed::LaunchRequest {
+        program: path_to_string(program),
+        cwd: project_path.parent().map(path_to_string_ref),
+        args: Vec::new(),
+        envs: build_task.env,
+    }))
+}
+
 fn ensure_adapter(adapter_name: &str) -> zed::Result<()> {
     if adapter_name != DEBUG_ADAPTER_ID {
         return Err(format!(
@@ -180,6 +218,90 @@ fn missing_debug_adapter_message() -> String {
     )
 }
 
+fn project_path_from_dotnet_args(args: &[String]) -> Option<String> {
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--project" || arg == "-p" {
+            return args.get(index + 1).cloned();
+        }
+
+        if let Some(value) = arg.strip_prefix("--project=") {
+            return Some(value.to_string());
+        }
+
+        if arg.ends_with(".vbproj") {
+            return Some(arg.clone());
+        }
+    }
+
+    None
+}
+
+fn absolutize_path(cwd: &str, path: &str) -> PathBuf {
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        path
+    } else {
+        PathBuf::from(cwd).join(path)
+    }
+}
+
+fn single_vb_project_in(cwd: &str) -> Option<PathBuf> {
+    let mut projects = Vec::new();
+    for entry in std::fs::read_dir(cwd).ok()? {
+        let path = entry.ok()?.path();
+        if path.extension().and_then(|extension| extension.to_str()) == Some("vbproj") {
+            projects.push(path);
+        }
+    }
+
+    if projects.len() == 1 {
+        projects.pop()
+    } else {
+        None
+    }
+}
+
+fn find_debug_program_for_project(project_path: &Path) -> Option<PathBuf> {
+    let project_dir = project_path.parent()?;
+    let assembly_name = project_path.file_stem()?.to_str()?;
+
+    for configuration in ["Debug", "Release"] {
+        let configuration_dir = project_dir.join("bin").join(configuration);
+        let Some(program) = find_assembly_under(&configuration_dir, assembly_name) else {
+            continue;
+        };
+
+        return Some(program);
+    }
+
+    None
+}
+
+fn find_assembly_under(root: &Path, assembly_name: &str) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(root).ok()? {
+        let path = entry.ok()?.path();
+        if path.is_dir() {
+            if let Some(found) = find_assembly_under(&path, assembly_name) {
+                return Some(found);
+            }
+        } else if path.file_name().and_then(|name| name.to_str())
+            == Some(&format!("{assembly_name}.dll"))
+        {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+fn path_to_string(path: PathBuf) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn path_to_string_ref(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +324,27 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("Unsupported debug adapter"));
+    }
+
+    #[test]
+    fn project_path_reads_dotnet_project_argument() {
+        assert_eq!(
+            project_path_from_dotnet_args(&[
+                "build".to_string(),
+                "--project".to_string(),
+                "App.vbproj".to_string()
+            ]),
+            Some("App.vbproj".to_string())
+        );
+        assert_eq!(
+            project_path_from_dotnet_args(&["run".to_string(), "--project=App.vbproj".to_string()]),
+            Some("App.vbproj".to_string())
+        );
+    }
+
+    #[test]
+    fn absolutize_keeps_absolute_paths() {
+        let path = absolutize_path(r"C:\repo", r"C:\repo\App.vbproj");
+        assert_eq!(path, PathBuf::from(r"C:\repo\App.vbproj"));
     }
 }

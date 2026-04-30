@@ -55,6 +55,8 @@ For detailed implementation milestones, see
 - Resolves the server from a configured path, `PATH`, or a pinned release
   download.
 - Provides a netcoredbg debug adapter registration and schema.
+- Provides an initial debug locator for `dotnet build` and `dotnet run` tasks
+  that can infer a single built VB.NET project output.
 - Uses the currently available external VB.NET tree-sitter grammar as an early
   bootstrap while the project-owned grammar workstream is built.
 
@@ -70,5 +72,5 @@ For detailed implementation milestones, see
 - Project load failures: check `Zed.log` and the language server stderr output
   for .NET SDK, MSBuild, or solution selection errors.
 
-The Tree-sitter query files are deliberately conservative placeholders until the
-VB.NET grammar schema is fully validated and owned by this project.
+The Tree-sitter query files are deliberately conservative and are limited to
+node names validated against the bootstrap grammar package.
