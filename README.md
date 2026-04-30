@@ -1,76 +1,160 @@
 # VB.NET for Zed
 
-This is the Zed extension snapshot for `vbnet-lsp`.
+VB.NET language support for Zed, generated from the canonical `vbnet-lsp`
+repository.
 
 Development happens in `DNAKode/vbnet-lsp` under
 `adapters/zed/vbnet-zed`. The standalone `DNAKode/vbnet-zed` repository is
-intended to be generated from this directory.
+mirrored distribution output.
 
-## Local Development
+## Installation
 
-1. Install Rust with `rustup`.
-2. Install the Wasm target:
+After publication, install `VB.NET` from Zed's extension registry.
 
-   ```powershell
-   rustup target add wasm32-wasip1
-   ```
+For local development, install Rust with `rustup`, add the Wasm target, then
+install this directory as a dev extension:
 
-3. Build the extension crate:
+```powershell
+rustup target add wasm32-wasip1
+cargo check --target wasm32-wasip1
+```
 
-   ```powershell
-   cargo check --target wasm32-wasip1
-   ```
+In Zed, run `zed: install dev extension` and select:
 
-4. Make a local VB.NET language server available on `PATH` as `vbnet-ls`, or
-   configure it in Zed settings:
+```text
+adapters/zed/vbnet-zed
+```
 
-   ```json
-   {
-     "lsp": {
-       "vbnet-ls": {
-         "binary": {
-           "path": "C:\\Work\\vbnet-lsp\\src\\VbNet.LanguageServer.Vb\\bin\\Debug\\net10.0\\VbNet.LanguageServer.exe"
-         }
-       }
-     }
-   }
-   ```
+## Language Server
 
-5. In Zed, run `zed: install dev extension` and select this directory.
+The extension starts `vbnet-ls` over stdio. Server resolution order is:
 
-If no local server is configured and `vbnet-ls` is not on `PATH`, the extension
-downloads the matching `DNAKode/vbnet-lsp` GitHub Release asset for its own
-version. Unsupported platforms should install the `DNAKode.VbNet.Lsp` .NET tool
-or configure `lsp.vbnet-ls.binary.path`.
+1. `lsp.vbnet-ls.binary.path` from Zed settings.
+2. `vbnet-ls` or `VbNet.LanguageServer` on `PATH`.
+3. The pinned `DNAKode/vbnet-lsp` GitHub Release asset matching this extension
+   version.
 
-For detailed implementation milestones, see
-`docs/zed-support-plan.md` in the monorepo.
+Local server development example:
+
+```json
+{
+  "lsp": {
+    "vbnet-ls": {
+      "binary": {
+        "path": "C:\\Work\\vbnet-lsp\\src\\VbNet.LanguageServer.Vb\\bin\\Debug\\net10.0\\VbNet.LanguageServer.exe",
+        "arguments": ["--stdio"]
+      }
+    }
+  }
+}
+```
+
+Workspace settings pass through to the server through Zed's LSP settings APIs.
+Use explicit settings when a workspace contains multiple solutions:
+
+```json
+{
+  "languages": {
+    "VB.NET": {
+      "language_servers": ["vbnet-ls"],
+      "tab_size": 4
+    }
+  },
+  "lsp": {
+    "vbnet-ls": {
+      "settings": {
+        "workspace": {
+          "solutionPath": "src/App.slnx",
+          "projectSearchPaths": ["src"],
+          "excludePaths": ["bin", "obj"]
+        },
+        "msbuildPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Current\\Bin\\MSBuild.exe",
+        "diagnostics": {
+          "mode": "workspace"
+        },
+        "semanticTokens": true,
+        "formatting": true,
+        "logLevel": "Information"
+      }
+    }
+  }
+}
+```
+
+## Workspace Behavior
+
+- `.vb` files are associated with `VB.NET`.
+- The extension registers only the `VB.NET` language and `vbnet-ls`.
+- It does not register aliases or language servers for C#.
+- mixed VB.NET/C# solutions can use the `.sln` or `.slnx` for VB semantic
+  context while C# buffers remain owned by Zed's C# support.
+- When automatic solution discovery is ambiguous, configure
+  `workspace.solutionPath` explicitly.
+
+## Debugging
+
+The extension registers the `netcoredbg` debug adapter and a schema for
+explicit launch/attach settings. Install `netcoredbg` on `PATH` or configure the
+adapter path through Zed's debug task UI.
+
+Explicit launch example:
+
+```json
+{
+  "adapter": "netcoredbg",
+  "label": "Debug VB.NET console",
+  "config": {
+    "type": "netcoredbg",
+    "request": "launch",
+    "name": "Debug VB.NET console",
+    "program": "bin/Debug/net10.0/MyApp.dll",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "args": [],
+    "env": {},
+    "stopAtEntry": false,
+    "justMyCode": true,
+    "enableStepFiltering": true
+  }
+}
+```
+
+The debug locator can infer a program from simple `dotnet build` or `dotnet run`
+tasks when a single VB.NET project output is available. Use an explicit
+`program` for multi-project workspaces or nonstandard output paths.
+
+Attach requires an explicit `processId` where Zed exposes attach configuration.
+Platform attach behavior still needs real-Zed smoke validation before it is
+treated as release-proven.
 
 ## Current Capability
 
 - Registers `.vb` files as `VB.NET`.
 - Registers `vbnet-ls` for VB.NET only.
-- Passes Zed LSP settings through to the language server.
-- Starts the server with `--stdio` by default.
-- Resolves the server from a configured path, `PATH`, or a pinned release
-  download.
-- Provides a netcoredbg debug adapter registration and schema.
-- Provides an initial debug locator for `dotnet build` and `dotnet run` tasks
-  that can infer a single built VB.NET project output.
-- Uses the currently available external VB.NET tree-sitter grammar as an early
-  bootstrap while the project-owned grammar workstream is built.
+- Provides Tree-sitter queries for highlighting, outline, folding,
+  indentation, bracket matching, and text objects using the bootstrap VB.NET
+  grammar.
+- Passes Zed LSP initialization options and workspace configuration through to
+  the server.
+- Resolves the server from configured path, `PATH`, or pinned release download.
+- Provides a `netcoredbg` debug adapter registration, schema, and initial debug
+  locator.
 
 ## Troubleshooting
 
-- Missing server: install `vbnet-ls` on `PATH`, configure
-  `lsp.vbnet-ls.binary.path`, or publish the matching GitHub Release server
-  archive.
+- Missing server: install `DNAKode.VbNet.Lsp` as a .NET tool, put `vbnet-ls` on
+  `PATH`, configure `lsp.vbnet-ls.binary.path`, or publish the matching GitHub
+  Release server archive.
 - Download blocked: allow Zed's `download_file` capability for
   `github.com/DNAKode/vbnet-lsp`, then restart the language server.
-- Unsupported platform: install `DNAKode.VbNet.Lsp` as a .NET tool or build the
-  server locally and configure its path.
-- Project load failures: check `Zed.log` and the language server stderr output
-  for .NET SDK, MSBuild, or solution selection errors.
+- Unsupported platform: build the server locally and configure
+  `lsp.vbnet-ls.binary.path`.
+- Missing .NET SDK or MSBuild: install the .NET SDK used by the project and, if
+  auto-detection fails, configure `msbuildPath`.
+- Project load failures: check `Zed.log` and language server stderr output for
+  MSBuild, SDK, or solution-selection errors.
+- Missing debugger: install `netcoredbg` on `PATH` or configure the debug
+  adapter path explicitly.
+- Breakpoints do not bind: build the project first and launch the compiled
+  Debug `.dll` with matching source files.
 
-The Tree-sitter query files are deliberately conservative and are limited to
-node names validated against the bootstrap grammar package.
+Issues and server releases are tracked in `DNAKode/vbnet-lsp`.
