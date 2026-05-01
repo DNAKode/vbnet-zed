@@ -305,6 +305,8 @@ fn path_to_string_ref(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn request_kind_reads_launch() {
@@ -346,5 +348,84 @@ mod tests {
     fn absolutize_keeps_absolute_paths() {
         let path = absolutize_path(r"C:\repo", r"C:\repo\App.vbproj");
         assert_eq!(path, PathBuf::from(r"C:\repo\App.vbproj"));
+    }
+
+    #[test]
+    fn run_dap_locator_finds_built_debug_dll() {
+        let root = temp_test_dir("built-debug-dll");
+        let project = root.join("DebugConsole.vbproj");
+        let program = root
+            .join("bin")
+            .join("Debug")
+            .join("net10.0")
+            .join("DebugConsole.dll");
+
+        fs::create_dir_all(program.parent().unwrap()).unwrap();
+        fs::write(&project, "<Project />").unwrap();
+        fs::write(&program, "").unwrap();
+
+        let request = run_dap_locator(
+            DEBUG_LOCATOR_ID.to_string(),
+            zed::TaskTemplate {
+                label: "dotnet build DebugConsole".to_string(),
+                command: "dotnet".to_string(),
+                args: vec![
+                    "build".to_string(),
+                    "--project".to_string(),
+                    path_to_string(project.clone()),
+                ],
+                env: Vec::new(),
+                cwd: Some(path_to_string(root.clone())),
+            },
+        )
+        .unwrap();
+
+        match request {
+            zed::DebugRequest::Launch(launch) => {
+                assert_eq!(PathBuf::from(launch.program), program);
+                assert_eq!(launch.cwd.map(PathBuf::from), Some(root.clone()));
+            }
+            zed::DebugRequest::Attach(_) => panic!("expected launch request"),
+        }
+
+        remove_temp_dir(root);
+    }
+
+    #[test]
+    fn run_dap_locator_reports_missing_build_output() {
+        let root = temp_test_dir("missing-build-output");
+        let project = root.join("DebugConsole.vbproj");
+        fs::write(&project, "<Project />").unwrap();
+
+        let error = run_dap_locator(
+            DEBUG_LOCATOR_ID.to_string(),
+            zed::TaskTemplate {
+                label: "dotnet build DebugConsole".to_string(),
+                command: "dotnet".to_string(),
+                args: vec!["build".to_string(), path_to_string(project.clone())],
+                env: Vec::new(),
+                cwd: Some(path_to_string(root.clone())),
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.contains("Could not find a built debug target"));
+        assert!(error.contains("Build the project first"));
+
+        remove_temp_dir(root);
+    }
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("vbnet-zed-{name}-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn remove_temp_dir(path: PathBuf) {
+        let _ = fs::remove_dir_all(path);
     }
 }
