@@ -3,6 +3,7 @@ use zed_extension_api as zed;
 pub(crate) fn preferred_solution_path(worktree: &zed::Worktree) -> Option<String> {
     for candidate in [
         "ZedSlnxFixture.slnx",
+        "ZedSlnfFixture.slnf",
         "ZedSlnFixture.sln",
         "ZedMixed.sln",
         "SmallProject.slnx",
